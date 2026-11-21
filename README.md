@@ -9,7 +9,7 @@ Log Sentinel es una herramienta SRE diseñada para ingerir y analizar archivos d
 ## Características principales
 
 * **Procesamiento en streaming (memoria acotada):** Lectura por bloques de 64 KB con descompresión `.gz` al vuelo mediante `zlib`, permitiendo procesar más de **1 millón de líneas (100 MB) en ~2.8 segundos** sin saturar la RAM.
-* **Detección estadística de anomalías (Z-Score):** Agrupación temporal por minuto y detección automática de picos anómalos ($Z\text{-score} > 2.5$) frente a la media base.
+* **Detección estadística de anomalías (Z-Score):** Agrupación temporal por minuto y detección automática de picos anómalos (`Z-score > 2.5`) frente a la media base.
 * **Clustering de errores y sanitizado PII:** Colapsa miles de líneas repetidas en firmas únicas y censura automáticamente correos electrónicos, direcciones IP y valores dinámicos antes de mostrar muestras o enviar contexto a la IA.
 * **Diagnóstico SRE con Gemini:** Envía únicamente el resumen estadístico y las firmas anonimizadas para obtener severidad, causa raíz, cadena de fallos y plan de mitigación.
 * **Gestión de incidentes y persistencia en PostgreSQL:**
@@ -24,6 +24,7 @@ Log Sentinel es una herramienta SRE diseñada para ingerir y analizar archivos d
 
 ## Capturas de pantalla
 
+> Añade tus capturas en una carpeta `docs/images/` y actualiza las rutas:
 
 | Dashboard de análisis y anomalías | Carpetas de proyectos e historial |
 | :---: | :---: |
