@@ -70,8 +70,12 @@ async def analyze_log_stream(file: UploadFile) -> dict:
         # Detectamos automáticamente si es un archivo .gz por sus magic bytes (\x1f\x8b)
         if first_chunk:
             first_chunk = False
-            if chunk.startswith(b"\x1f\x8b") or (file.filename or "").endswith(".gz"):
+            if chunk.startswith(b"\x1f\x8b") or (file.filename or "").lower().endswith(".gz"):
                 decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
+            elif b"\x00" in chunk[:2048]:
+                raise ValueError(
+                    "El archivo parece ser binario o estar corrupto. Por favor, sube archivos de texto plano (.log, .txt) o comprimidos (.log.gz)."
+                )
 
         data = decompressor.decompress(chunk) if decompressor else chunk
         buffer += data.decode("utf-8", errors="replace")
@@ -100,6 +104,11 @@ async def analyze_log_stream(file: UploadFile) -> dict:
     ]
 
     elapsed = round(time.perf_counter() - start_time, 2)
+    
+    if total_lines == 0:
+        raise ValueError(
+            "El archivo está vacío o no contiene líneas legibles. Sube un archivo de log válido (.log, .txt o .log.gz)."
+        )
 
     return {
         "filename": file.filename,

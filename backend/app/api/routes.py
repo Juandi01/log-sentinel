@@ -1,4 +1,5 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from datetime import datetime, timezone
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.core.parser import analyze_log_stream
@@ -8,6 +9,8 @@ from app.models import AnalysisRecord
 
 router = APIRouter(prefix="/api", tags=["logs"])
 
+ALLOWED_EXTENSIONS = (".log", ".txt", ".gz")
+
 
 class DiagnoseRequest(BaseModel):
     analysis_id: int | None = None
@@ -16,16 +19,43 @@ class DiagnoseRequest(BaseModel):
     ai_context_sample: list[str]
 
 
-@router.post("/analyze")
-async def analyze_log(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    result = await analyze_log_stream(file)
+class UpdateRecordRequest(BaseModel):
+    status: str | None = None  # "open" | "resolved"
+    project_name: str | None = None
 
+
+@router.post("/analyze")
+async def analyze_log(
+    file: UploadFile = File(...),
+    project_name: str = Form("General"),
+    db: Session = Depends(get_db),
+):
+    filename = (file.filename or "").strip()
+    if not filename.lower().endswith(ALLOWED_EXTENSIONS):
+        raise HTTPException(
+            status_code=400,
+            detail="Tipo de archivo no permitido. Por favor, sube un archivo válido (.log, .txt o .log.gz).",
+        )
+
+    try:
+        result = await analyze_log_stream(file)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="No se pudo leer el archivo. Asegúrate de subir un log válido (.log, .txt o .log.gz).",
+        )
+
+    clean_project = project_name.strip()[:80] or "General"
     error_total = (
         result["level_counts"].get("ERROR", 0)
         + result["level_counts"].get("CRITICAL", 0)
     )
 
     record = AnalysisRecord(
+        project_name=clean_project,
+        status="open",
         filename=result["filename"],
         size_mb=result["size_mb"],
         processing_time_sec=result["processing_time_sec"],
@@ -43,6 +73,8 @@ async def analyze_log(file: UploadFile = File(...), db: Session = Depends(get_db
     db.refresh(record)
 
     result["id"] = record.id
+    result["project_name"] = record.project_name
+    result["status"] = record.status
     return result
 
 
@@ -71,7 +103,7 @@ def diagnose_log(req: DiagnoseRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/history")
-def get_history(limit: int = 20, db: Session = Depends(get_db)):
+def get_history(limit: int = 50, db: Session = Depends(get_db)):
     records = (
         db.query(AnalysisRecord)
         .order_by(AnalysisRecord.created_at.desc())
@@ -81,6 +113,8 @@ def get_history(limit: int = 20, db: Session = Depends(get_db)):
     return [
         {
             "id": r.id,
+            "project_name": r.project_name,
+            "status": r.status,
             "filename": r.filename,
             "size_mb": r.size_mb,
             "processing_time_sec": r.processing_time_sec,
@@ -90,6 +124,7 @@ def get_history(limit: int = 20, db: Session = Depends(get_db)):
             "has_diagnosis": r.diagnosis is not None,
             "severity": r.diagnosis.get("severity") if r.diagnosis else None,
             "created_at": r.created_at.isoformat(),
+            "resolved_at": r.resolved_at.isoformat() if r.resolved_at else None,
         }
         for r in records
     ]
@@ -102,6 +137,8 @@ def get_history_detail(record_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Análisis no encontrado")
     return {
         "id": r.id,
+        "project_name": r.project_name,
+        "status": r.status,
         "filename": r.filename,
         "size_mb": r.size_mb,
         "processing_time_sec": r.processing_time_sec,
@@ -113,6 +150,34 @@ def get_history_detail(record_id: int, db: Session = Depends(get_db)):
         "ai_context_sample": r.ai_context_sample,
         "diagnosis": r.diagnosis,
         "created_at": r.created_at.isoformat(),
+        "resolved_at": r.resolved_at.isoformat() if r.resolved_at else None,
+    }
+
+
+@router.patch("/history/{record_id}")
+def update_history_record(
+    record_id: int, req: UpdateRecordRequest, db: Session = Depends(get_db)
+):
+    r = db.query(AnalysisRecord).filter(AnalysisRecord.id == record_id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Análisis no encontrado")
+
+    if req.status is not None:
+        if req.status not in ("open", "resolved"):
+            raise HTTPException(status_code=400, detail="Estado no válido")
+        r.status = req.status
+        r.resolved_at = datetime.now(timezone.utc) if req.status == "resolved" else None
+
+    if req.project_name is not None:
+        r.project_name = req.project_name.strip()[:80] or "General"
+
+    db.commit()
+    db.refresh(r)
+    return {
+        "id": r.id,
+        "status": r.status,
+        "project_name": r.project_name,
+        "resolved_at": r.resolved_at.isoformat() if r.resolved_at else None,
     }
 
 

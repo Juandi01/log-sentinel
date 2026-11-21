@@ -30,6 +30,8 @@ export interface DiagnosisResult {
 
 export interface AnalysisResult {
   id?: number;
+  project_name?: string;
+  status?: "open" | "resolved";
   filename: string;
   size_mb: number;
   processing_time_sec: number;
@@ -40,10 +42,13 @@ export interface AnalysisResult {
   timeline: TimelinePoint[];
   ai_context_sample: string[];
   diagnosis?: DiagnosisResult | null;
+  resolved_at?: string | null;
 }
 
 export interface HistoryItem {
   id: number;
+  project_name: string;
+  status: "open" | "resolved";
   filename: string;
   size_mb: number;
   processing_time_sec: number;
@@ -53,15 +58,18 @@ export interface HistoryItem {
   has_diagnosis: boolean;
   severity: string | null;
   created_at: string;
+  resolved_at: string | null;
 }
 
 export function analyzeLogFile(
   file: File,
+  projectName = "General",
   onProgress?: (percent: number) => void
 ): Promise<AnalysisResult> {
   return new Promise((resolve, reject) => {
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("project_name", projectName.trim() || "General");
 
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${API_URL}/api/analyze`);
@@ -95,7 +103,9 @@ export function analyzeLogFile(
   });
 }
 
-export async function diagnoseIncident(analysis: AnalysisResult): Promise<DiagnosisResult> {
+export async function diagnoseIncident(
+  analysis: AnalysisResult
+): Promise<DiagnosisResult> {
   const res = await fetch(`${API_URL}/api/diagnose`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -124,6 +134,19 @@ export async function fetchHistory(): Promise<HistoryItem[]> {
 export async function fetchHistoryDetail(id: number): Promise<AnalysisResult> {
   const res = await fetch(`${API_URL}/api/history/${id}`);
   if (!res.ok) throw new Error("Error al cargar el análisis");
+  return res.json();
+}
+
+export async function updateHistoryStatus(
+  id: number,
+  status: "open" | "resolved"
+): Promise<{ id: number; status: "open" | "resolved"; resolved_at: string | null }> {
+  const res = await fetch(`${API_URL}/api/history/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+  if (!res.ok) throw new Error("Error al actualizar el estado");
   return res.json();
 }
 
