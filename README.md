@@ -24,8 +24,6 @@ Log Sentinel es una herramienta SRE diseñada para ingerir y analizar archivos d
 
 ## Capturas de pantalla
 
-> Añade tus capturas en una carpeta `docs/images/` y actualiza las rutas:
-
 | Dashboard de análisis y anomalías | Carpetas de proyectos e historial |
 | :---: | :---: |
 | ![Dashboard](docs/images/dashboard.png) | ![Carpetas](docs/images/folders.png) |
@@ -61,3 +59,55 @@ log-sentinel/
 │       ├── services/api.ts      # Cliente API + progreso real de subida (XHR)
 │       └── utils/exportMarkdown.ts
 └── docker-compose.yml
+```
+
+---
+
+## Puesta en marcha
+
+### 1. Requisitos previos
+* [Docker](https://www.docker.com/) y Docker Compose
+* Una API Key de [Google AI Studio (Gemini)](https://aistudio.google.com/)
+
+### 2. Configurar variables de entorno
+Crea un archivo `.env` en la raíz del proyecto:
+
+```env
+GEMINI_API_KEY=tu_api_key_de_gemini
+```
+
+### 3. Levantar el stack completo
+
+```bash
+docker compose up -d --build
+```
+
+* **Frontend:** [http://localhost:5173](http://localhost:5173)
+* **Backend (Swagger UI):** [http://localhost:8000/docs](http://localhost:8000/docs)
+
+---
+
+## Tests
+
+El backend incluye una batería de tests con `pytest` que valida el sanitizado PII, el clustering de patrones, la detección de anomalías Z-Score, el streaming de `.log`/`.log.gz` y el rechazo de binarios o archivos vacíos:
+
+```bash
+docker compose exec backend pytest -v
+```
+
+---
+
+## Benchmark de referencia
+
+Pruebas realizadas en entorno local con Docker sobre un archivo sintético de producción (`server_heavy.log` y su versión comprimida `server_heavy.log.gz`):
+
+| Archivo | Tamaño | Líneas procesadas | Tiempo total | Patrones colapsados |
+| :--- | :---: | :---: | :---: | :---: |
+| `server_heavy.log` | 100 MB | 1.034.121 | ~2.86 s | 26.625 errores → 4 firmas |
+| `server_heavy.log.gz` | 11.37 MB | 1.034.121 | ~2.80 s | 26.625 errores → 4 firmas |
+
+---
+
+## Autor
+
+**Juan Diego Delgado Morente** — [GitHub @Juandi01](https://github.com/Juandi01)
