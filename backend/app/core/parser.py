@@ -1,13 +1,17 @@
 import re
 import time
+import zlib
 from collections import defaultdict, deque
 from fastapi import UploadFile
 from app.core.clusterer import normalize_pattern
 from app.core.scrubber import scrub_pii
 from app.core.anomaly import detect_anomalies
 
-LINE_META_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}):\d{2}\s+(INFO|WARN|WARNING|ERROR|CRITICAL)")
+LINE_META_RE = re.compile(
+    r"^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}):\d{2}\s+(INFO|WARN|WARNING|ERROR|CRITICAL)"
+)
 CHUNK_SIZE = 64 * 1024  # 64 KB por lectura
+
 
 async def analyze_log_stream(file: UploadFile) -> dict:
     start_time = time.perf_counter()
@@ -21,7 +25,40 @@ async def analyze_log_stream(file: UploadFile) -> dict:
     recent_context = deque(maxlen=30)
     spike_context: dict[str, list[str]] = {}
 
+    def process_line(line: str) -> None:
+        nonlocal total_lines
+        if not line.strip():
+            return
+        total_lines += 1
+        match = LINE_META_RE.match(line)
+
+        if match:
+            minute, level = match.group(1), match.group(2)
+            level_counts[level] += 1
+            timeline_total[minute] += 1
+
+            if level in ("ERROR", "CRITICAL"):
+                timeline_errors[minute] += 1
+                pattern = normalize_pattern(line)
+                if pattern not in clusters:
+                    clusters[pattern] = {
+                        "pattern": pattern,
+                        "level": level,
+                        "count": 0,
+                        "sample": scrub_pii(line),
+                    }
+                clusters[pattern]["count"] += 1
+
+                if minute not in spike_context and timeline_errors[minute] == 10:
+                    spike_context[minute] = list(recent_context) + [scrub_pii(line)]
+            else:
+                timeline_errors.setdefault(minute, 0)
+
+        recent_context.append(scrub_pii(line))
+
     buffer = ""
+    decompressor = None
+    first_chunk = True
 
     while True:
         chunk = await file.read(CHUNK_SIZE)
@@ -29,45 +66,34 @@ async def analyze_log_stream(file: UploadFile) -> dict:
             break
 
         total_bytes += len(chunk)
-        buffer += chunk.decode("utf-8", errors="replace")
+
+        # Detectamos automáticamente si es un archivo .gz por sus magic bytes (\x1f\x8b)
+        if first_chunk:
+            first_chunk = False
+            if chunk.startswith(b"\x1f\x8b") or (file.filename or "").endswith(".gz"):
+                decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
+
+        data = decompressor.decompress(chunk) if decompressor else chunk
+        buffer += data.decode("utf-8", errors="replace")
+
         lines = buffer.split("\n")
-        buffer = lines.pop()  # Guardamos la última línea incompleta para el siguiente trozo
+        buffer = lines.pop()
 
         for line in lines:
-            if not line.strip():
-                continue
-            total_lines += 1
-            match = LINE_META_RE.match(line)
+            process_line(line)
 
-            if match:
-                minute, level = match.group(1), match.group(2)
-                level_counts[level] += 1
-                timeline_total[minute] += 1
+    # Vaciamos el resto del descompresor y la última línea si no acababa en salto de línea
+    if decompressor:
+        tail = decompressor.flush()
+        if tail:
+            buffer += tail.decode("utf-8", errors="replace")
 
-                if level in ("ERROR", "CRITICAL"):
-                    timeline_errors[minute] += 1
-                    pattern = normalize_pattern(line)
-                    if pattern not in clusters:
-                        clusters[pattern] = {
-                            "pattern": pattern,
-                            "level": level,
-                            "count": 0,
-                            "sample": scrub_pii(line),
-                        }
-                    clusters[pattern]["count"] += 1
-
-                    # Guardamos un pequeño contexto del primer pico de cada minuto para la IA
-                    if minute not in spike_context and timeline_errors[minute] == 10:
-                        spike_context[minute] = list(recent_context) + [scrub_pii(line)]
-                else:
-                    timeline_errors.setdefault(minute, 0)
-
-            recent_context.append(scrub_pii(line))
+    for line in buffer.split("\n"):
+        process_line(line)
 
     anomalies = detect_anomalies(timeline_errors)
     top_clusters = sorted(clusters.values(), key=lambda c: c["count"], reverse=True)[:10]
 
-    # Construimos la serie temporal ordenada para las gráficas del frontend
     timeline = [
         {"minute": m, "total": timeline_total[m], "errors": timeline_errors.get(m, 0)}
         for m in sorted(timeline_total.keys())
