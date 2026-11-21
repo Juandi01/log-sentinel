@@ -1,6 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import router as log_router
+from app.database import Base, engine
+from app.models import AnalysisRecord  # noqa: F401 (registra la tabla)
+
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Log Sentinel API", version="0.1.0")
 
