@@ -24,7 +24,6 @@ Log Sentinel es una herramienta SRE diseñada para ingerir y analizar archivos d
 
 ## Capturas de pantalla
 
-> Añade tus capturas en una carpeta `docs/images/` y actualiza las rutas:
 
 | Dashboard de análisis y anomalías | Carpetas de proyectos e historial |
 | :---: | :---: |
